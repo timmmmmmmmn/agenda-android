@@ -1,0 +1,7 @@
+<resources>
+    <!-- Donker thema: de webinterface krijgt dan prefers-color-scheme: dark -->
+    <style name="Theme.Agenda" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/page_bg</item>
+        <item name="android:colorAccent">@color/brand</item>
+    </style>
+</resources>
