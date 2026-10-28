@@ -1,8 +1,10 @@
 package nl.timvanbergen.agenda
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
@@ -19,6 +21,7 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -38,6 +41,9 @@ class MainActivity : ComponentActivity() {
     // Ruimte van status- en navigatiebalk in CSS-pixels; de pagina leest dit via AgendaNative.insets().
     @Volatile private var insetTop = 0f
     @Volatile private var insetBottom = 0f
+
+    // Toestemming voor meldingen (Android 13+); daarna meteen herinneringen ophalen.
+    private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { syncInBackground() }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,7 +91,7 @@ class MainActivity : ComponentActivity() {
             domStorageEnabled = true
             setSupportZoom(false)
             builtInZoomControls = false
-            userAgentString = "$userAgentString AgendaApp/1.1"
+            userAgentString = "$userAgentString AgendaApp/1.2"
         }
         web.addJavascriptInterface(Bridge(), "AgendaNative")
         web.webViewClient = AgendaClient()
@@ -103,6 +109,24 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null || web.restoreState(savedInstanceState) == null) {
             web.loadUrl(HOME)
         }
+
+        AgendaSync.createChannels(this)
+        AgendaSync.scheduleBackground(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        syncInBackground()
+    }
+
+    private fun syncInBackground() {
+        val app = applicationContext
+        Thread { AgendaSync.run(app) }.start()
     }
 
     private fun setDarkBars(dark: Boolean) {
@@ -151,6 +175,12 @@ class MainActivity : ComponentActivity() {
                 }
                 web.performHapticFeedback(effect)
             }
+        }
+
+        /** Na opslaan of verwijderen in de app: herinneringen meteen opnieuw inplannen. */
+        @JavascriptInterface
+        fun syncReminders() {
+            runOnUiThread { if (onOurSite()) syncInBackground() }
         }
 
         @JavascriptInterface
