@@ -4,3 +4,6 @@ local.properties
 .idea/
 *.iml
 .DS_Store
+*.jks
+*.keystore
+agenda-release.properties
