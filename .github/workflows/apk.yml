@@ -13,17 +13,20 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
-      - uses: android-actions/setup-android@v3
-
+      # De Android SDK staat al op de GitHub-server; alleen versie 37 bijzetten.
       - name: Android SDK 37 installeren
-        run: sdkmanager "platforms;android-37.0" "build-tools;36.0.0"
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-37.0" "build-tools;36.0.0"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Ondertekeningssleutel klaarzetten
         run: echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/agenda-release.jks"
