@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <!-- Na herstart van de telefoon de herinneringen opnieuw inplannen -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Automatische updates: Agenda installeert zijn eigen nieuwe versie -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:allowBackup="true"
@@ -30,6 +32,7 @@
         </activity>
 
         <receiver android:name=".ReminderReceiver" android:exported="false" />
+        <receiver android:name=".InstallReceiver" android:exported="false" />
 
         <receiver android:name=".SyncReceiver" android:exported="false">
             <intent-filter>

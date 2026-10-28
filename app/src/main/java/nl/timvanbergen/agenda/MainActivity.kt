@@ -91,7 +91,7 @@ class MainActivity : ComponentActivity() {
             domStorageEnabled = true
             setSupportZoom(false)
             builtInZoomControls = false
-            userAgentString = "$userAgentString AgendaApp/1.2"
+            userAgentString = "$userAgentString AgendaApp/1.3"
         }
         web.addJavascriptInterface(Bridge(), "AgendaNative")
         web.webViewClient = AgendaClient()
@@ -117,11 +117,13 @@ class MainActivity : ComponentActivity() {
         ) {
             askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+        Updater.checkQuietly(this)
     }
 
     override fun onResume() {
         super.onResume()
         syncInBackground()
+        Updater.resume(this)
     }
 
     private fun syncInBackground() {
@@ -175,6 +177,15 @@ class MainActivity : ComponentActivity() {
                 }
                 web.performHapticFeedback(effect)
             }
+        }
+
+        @JavascriptInterface
+        fun appVersion(): String = Updater.currentName(this@MainActivity)
+
+        /** "App bijwerken" in het Meer-menu. */
+        @JavascriptInterface
+        fun checkForUpdate() {
+            runOnUiThread { if (onOurSite()) Updater.check(this@MainActivity, manual = true) }
         }
 
         /** Na opslaan of verwijderen in de app: herinneringen meteen opnieuw inplannen. */
