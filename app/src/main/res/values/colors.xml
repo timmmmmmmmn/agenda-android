@@ -1,4 +1,9 @@
 <resources>
     <color name="page_bg">#FFFFFF</color>
     <color name="brand">#2F6FED</color>
+    <color name="widget_bg">#FFFFFF</color>
+    <color name="widget_text">#0B0D10</color>
+    <color name="widget_muted">#6B6F76</color>
+    <color name="widget_ink">#0B0D10</color>
+    <color name="widget_on_ink">#FFFFFF</color>
 </resources>

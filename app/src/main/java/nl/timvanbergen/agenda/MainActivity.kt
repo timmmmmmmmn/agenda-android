@@ -2,6 +2,7 @@ package nl.timvanbergen.agenda
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.DownloadManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -10,15 +11,20 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.URLUtil
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,6 +47,13 @@ class MainActivity : ComponentActivity() {
     // Ruimte van status- en navigatiebalk in CSS-pixels; de pagina leest dit via AgendaNative.insets().
     @Volatile private var insetTop = 0f
     @Volatile private var insetBottom = 0f
+
+    // Bestand kiezen voor <input type="file"> (importeren van een .ics).
+    private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private val pickFile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        fileCallback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(res.resultCode, res.data))
+        fileCallback = null
+    }
 
     // Toestemming voor meldingen (Android 13+); daarna meteen herinneringen ophalen.
     private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { syncInBackground() }
@@ -91,10 +104,40 @@ class MainActivity : ComponentActivity() {
             domStorageEnabled = true
             setSupportZoom(false)
             builtInZoomControls = false
-            userAgentString = "$userAgentString AgendaApp/1.3"
+            userAgentString = "$userAgentString AgendaApp/1.4"
         }
         web.addJavascriptInterface(Bridge(), "AgendaNative")
         web.webViewClient = AgendaClient()
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
+                fileCallback?.onReceiveValue(null)
+                fileCallback = callback
+                return try {
+                    pickFile.launch(params.createIntent().apply { type = "*/*" })
+                    true
+                } catch (_: ActivityNotFoundException) {
+                    fileCallback = null
+                    false
+                }
+            }
+        }
+        // Back-up downloaden: via Downloadbeheer, met de inlogcookie erbij.
+        web.setDownloadListener { url, userAgent, disposition, mime, _ ->
+            try {
+                val name = URLUtil.guessFileName(url, disposition, mime)
+                val request = DownloadManager.Request(Uri.parse(url))
+                    .addRequestHeader("Cookie", CookieManager.getInstance().getCookie(url) ?: "")
+                    .addRequestHeader("User-Agent", userAgent)
+                    .setMimeType(mime)
+                    .setTitle(name)
+                    .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                    .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+                getSystemService(DownloadManager::class.java).enqueue(request)
+                Toast.makeText(this, "Downloaden naar Downloads…", Toast.LENGTH_SHORT).show()
+            } catch (_: Exception) {
+                Toast.makeText(this, "Downloaden lukte niet", Toast.LENGTH_LONG).show()
+            }
+        }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -107,7 +150,7 @@ class MainActivity : ComponentActivity() {
         })
 
         if (savedInstanceState == null || web.restoreState(savedInstanceState) == null) {
-            web.loadUrl(HOME)
+            web.loadUrl(HOME + linkQuery(intent))
         }
 
         AgendaSync.createChannels(this)
@@ -120,6 +163,27 @@ class MainActivity : ComponentActivity() {
         Updater.checkQuietly(this)
     }
 
+    /** Vanuit de widget: een afspraak openen of een nieuwe maken. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val data = intent.data ?: return
+        val js = when (data.host) {
+            "open" -> data.pathSegments.takeIf { it.size == 2 }?.let { "window.agendaOpen && agendaOpen('${it[0].toLongOrNull() ?: return}','${it[1].toLongOrNull() ?: return}')" }
+            "nieuw" -> "window.agendaNew && agendaNew()"
+            else -> null
+        } ?: return
+        if (onOurSite()) web.evaluateJavascript(js, null) else web.loadUrl(HOME + linkQuery(intent))
+    }
+
+    private fun linkQuery(intent: Intent?): String {
+        val data = intent?.data ?: return ""
+        return when (data.host) {
+            "open" -> data.pathSegments.takeIf { it.size == 2 && it.all { s -> s.toLongOrNull() != null } }?.let { "?open=${it[0]}-${it[1]}" } ?: ""
+            "nieuw" -> "?nieuw=1"
+            else -> ""
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         syncInBackground()
@@ -128,7 +192,10 @@ class MainActivity : ComponentActivity() {
 
     private fun syncInBackground() {
         val app = applicationContext
-        Thread { AgendaSync.run(app) }.start()
+        Thread {
+            AgendaSync.run(app)
+            AgendaWidget.refresh(app)
+        }.start()
     }
 
     private fun setDarkBars(dark: Boolean) {

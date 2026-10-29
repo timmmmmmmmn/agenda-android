@@ -31,6 +31,17 @@
             </intent-filter>
         </activity>
 
+        <receiver android:name=".AgendaWidget" android:exported="false" android:label="Agenda">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/agenda_widget" />
+        </receiver>
+        <service
+            android:name=".WidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
         <receiver android:name=".ReminderReceiver" android:exported="false" />
         <receiver android:name=".InstallReceiver" android:exported="false" />
 

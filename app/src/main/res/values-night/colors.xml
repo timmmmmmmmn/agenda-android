@@ -1,3 +1,8 @@
 <resources>
     <color name="page_bg">#151821</color>
+    <color name="widget_bg">#111316</color>
+    <color name="widget_text">#F2F3F5</color>
+    <color name="widget_muted">#8C929B</color>
+    <color name="widget_ink">#F2F3F5</color>
+    <color name="widget_on_ink">#0B0D10</color>
 </resources>

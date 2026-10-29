@@ -62,6 +62,7 @@ class SyncReceiver : BroadcastReceiver() {
         Thread {
             try {
                 AgendaSync.run(context.applicationContext)
+                AgendaWidget.refresh(context.applicationContext)
             } finally {
                 pending.finish()
             }

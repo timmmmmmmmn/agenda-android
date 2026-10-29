@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Agenda</string>
+    <string name="widget_description">Je afspraken van vandaag en de komende twee weken</string>
 </resources>
