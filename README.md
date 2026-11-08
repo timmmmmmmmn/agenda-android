@@ -27,3 +27,12 @@ dus bewaar een back-up.
 ./gradlew assembleRelease   # gebruikt ../agenda-release.properties
 ./gradlew assembleDebug
 ```
+
+## Glazen menu
+
+Het keuzemenu Dag/Week/Maand is op Android 13+ een native menu van glas (`glass/`).
+De pagina opent het via `AgendaNative.glassMenu()`; op oudere toestellen blijft het
+menu van de website. De code is overgenomen uit
+[expo-glass-custom-menu](https://github.com/rit3zh/expo-glass-custom-menu) (MIT, zie
+`glass/LICENSE`), zonder Expo en React Native. Het lettertype Inter valt onder de OFL
+(`assets/fonts/Inter-OFL.txt`).

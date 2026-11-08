@@ -8,12 +8,14 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.RectF
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.view.HapticFeedbackConstants
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.URLUtil
@@ -28,10 +30,14 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import nl.timvanbergen.agenda.glass.GlassMenu
+import nl.timvanbergen.agenda.glass.records.GlassMenuItemRecord
+import org.json.JSONObject
 
 /**
  * De agenda als app: de webinterface van agenda.timvanbergen.nl in een eigen venster.
@@ -43,6 +49,9 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var web: WebView
     private lateinit var bars: WindowInsetsControllerCompat
+
+    // Het glazen keuzemenu; de shaders daarvan bestaan pas vanaf Android 13.
+    private var glassMenu: GlassMenu? = null
 
     // Ruimte van status- en navigatiebalk in CSS-pixels; de pagina leest dit via AgendaNative.insets().
     @Volatile private var insetTop = 0f
@@ -78,6 +87,9 @@ class MainActivity : ComponentActivity() {
         web = WebView(this)
         root.addView(web, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         setContentView(root)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            glassMenu = GlassMenu(window.decorView as ViewGroup)
+        }
 
         val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
         bars = WindowCompat.getInsetsController(window, root)
@@ -210,6 +222,29 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    /** Opent het glazen menu vanuit een knop in de pagina (positie in CSS-pixels). */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun showGlassMenu(menu: JSONObject) {
+        val density = resources.displayMetrics.density
+        val origin = IntArray(2).also { web.getLocationInWindow(it) }
+        val left = origin[0] + menu.getDouble("x").toFloat() * density
+        val top = origin[1] + menu.getDouble("y").toFloat() * density
+        val from = RectF(left, top, left + menu.getDouble("w").toFloat() * density, top + menu.getDouble("h").toFloat() * density)
+        val rows = menu.getJSONArray("items")
+        val items = List(rows.length()) { i ->
+            val row = rows.getJSONObject(i)
+            GlassMenuItemRecord(
+                id = row.getString("id"),
+                title = row.getString("title"),
+                icon = row.optString("icon").ifEmpty { null },
+                checked = row.optBoolean("checked"),
+            )
+        }
+        glassMenu?.show(from, items, menu.optBoolean("dark")) { id ->
+            web.evaluateJavascript("window.agendaGlassPick && agendaGlassPick(${JSONObject.quote(id)})", null)
+        }
+    }
+
     private fun onOurSite(): Boolean = web.url?.let { Uri.parse(it).host == HOST } ?: false
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -259,6 +294,15 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun syncReminders() {
             runOnUiThread { if (onOurSite()) syncInBackground() }
+        }
+
+        /** Geeft false terug als het hier niet kan (ouder dan Android 13); de pagina toont dan haar eigen menu. */
+        @JavascriptInterface
+        fun glassMenu(json: String): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
+            val menu = JSONObject(json)
+            runOnUiThread { if (onOurSite()) showGlassMenu(menu) }
+            return true
         }
 
         @JavascriptInterface
