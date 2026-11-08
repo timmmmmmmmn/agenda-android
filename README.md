@@ -30,11 +30,10 @@ dus bewaar een back-up.
 
 ## Vloeibaar glas
 
-Op Android 13+ is de hele app van glas. De navigatie, de +-knop, het Meer-menu en alle
-keuzelijsten zijn native en tekenen echt glas over de pagina (`glass/`); de pagina geeft de
-plek en de inhoud door via `AgendaNative`. De panelen met formulieren gebruiken hetzelfde
-gezicht via `html.glass` in de CSS van de website, alleen in deze app. Op oudere
-toestellen blijft de gewone app.
+Op Android 13+ zijn de navigatie, de +-knop, het Meer-menu en alle keuzelijsten van glas.
+Ze zijn native en tekenen echt glas over de pagina (`glass/`); de pagina geeft de plek en
+de inhoud door via `AgendaNative`. Al het andere blijft plat. Op oudere toestellen blijft
+de gewone app.
 
 De code is overgenomen uit
 [expo-glass-custom-menu](https://github.com/rit3zh/expo-glass-custom-menu) (MIT, zie
