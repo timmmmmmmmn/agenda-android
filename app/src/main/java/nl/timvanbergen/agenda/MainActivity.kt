@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.RectF
 import android.net.Uri
@@ -15,6 +16,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.view.HapticFeedbackConstants
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -35,6 +37,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import nl.timvanbergen.agenda.glass.GlassBar
 import nl.timvanbergen.agenda.glass.GlassMenu
 import nl.timvanbergen.agenda.glass.records.GlassMenuItemRecord
 import org.json.JSONObject
@@ -225,24 +228,57 @@ class MainActivity : ComponentActivity() {
     /** Opent het glazen menu vanuit een knop in de pagina (positie in CSS-pixels). */
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun showGlassMenu(menu: JSONObject) {
-        val density = resources.displayMetrics.density
-        val origin = IntArray(2).also { web.getLocationInWindow(it) }
-        val left = origin[0] + menu.getDouble("x").toFloat() * density
-        val top = origin[1] + menu.getDouble("y").toFloat() * density
-        val from = RectF(left, top, left + menu.getDouble("w").toFloat() * density, top + menu.getDouble("h").toFloat() * density)
-        val rows = menu.getJSONArray("items")
-        val items = List(rows.length()) { i ->
-            val row = rows.getJSONObject(i)
-            GlassMenuItemRecord(
-                id = row.getString("id"),
-                title = row.getString("title"),
-                icon = row.optString("icon").ifEmpty { null },
-                checked = row.optBoolean("checked"),
-            )
-        }
-        glassMenu?.show(from, items, menu.optBoolean("dark")) { id ->
+        val from = windowRect(menu)
+        glassMenu?.show(from, glassItems(menu), menu.optBoolean("dark")) { id ->
             web.evaluateJavascript("window.agendaGlassPick && agendaGlassPick(${JSONObject.quote(id)})", null)
         }
+    }
+
+    private fun glassItems(menu: JSONObject): List<GlassMenuItemRecord> {
+        val rows = menu.getJSONArray("items")
+        return List(rows.length()) { i ->
+            val row = rows.getJSONObject(i)
+            GlassMenuItemRecord(
+                id = row.optString("id"),
+                title = row.optString("title"),
+                subtitle = row.optString("subtitle").ifEmpty { null },
+                icon = row.optString("icon").ifEmpty { null },
+                checked = if (row.has("checked")) row.optBoolean("checked") else null,
+                destructive = row.optBoolean("destructive"),
+                disabled = row.optBoolean("disabled"),
+                keepOpen = row.optBoolean("keepOpen"),
+                separator = row.optBoolean("separator"),
+                heading = row.optBoolean("heading"),
+                color = row.optString("color").ifEmpty { null }?.let { runCatching { Color.parseColor(it) }.getOrNull() },
+            )
+        }
+    }
+
+    /** De glazen navigatie; de pagina meet zelf waar die hoort te staan (in CSS-pixels). */
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun showGlassBar(bar: JSONObject) {
+        val tabs = bar.getJSONArray("tabs")
+        glassMenu?.setBar(
+            windowRect(bar.getJSONObject("pill")),
+            windowRect(bar.getJSONObject("add")),
+            List(tabs.length()) { i ->
+                val tab = tabs.getJSONObject(i)
+                GlassBar.Tab(tab.getString("id"), tab.getString("title"), tab.getString("icon"))
+            },
+            bar.getString("active"),
+            bar.optBoolean("dark"),
+            bar.optBoolean("visible", true),
+        ) { id ->
+            web.evaluateJavascript("window.agendaGlassNav && agendaGlassNav(${JSONObject.quote(id)})", null)
+        }
+    }
+
+    private fun windowRect(box: JSONObject): RectF {
+        val density = resources.displayMetrics.density
+        val origin = IntArray(2).also { web.getLocationInWindow(it) }
+        val left = origin[0] + box.getDouble("x").toFloat() * density
+        val top = origin[1] + box.getDouble("y").toFloat() * density
+        return RectF(left, top, left + box.getDouble("w").toFloat() * density, top + box.getDouble("h").toFloat() * density)
     }
 
     private fun onOurSite(): Boolean = web.url?.let { Uri.parse(it).host == HOST } ?: false
@@ -275,6 +311,9 @@ class MainActivity : ComponentActivity() {
                 val effect = when {
                     kind == "confirm" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> HapticFeedbackConstants.CONFIRM
                     kind == "confirm" -> HapticFeedbackConstants.VIRTUAL_KEY
+                    kind == "reject" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> HapticFeedbackConstants.REJECT
+                    kind == "reject" -> HapticFeedbackConstants.LONG_PRESS
+                    kind == "long" -> HapticFeedbackConstants.LONG_PRESS
                     else -> HapticFeedbackConstants.CLOCK_TICK
                 }
                 web.performHapticFeedback(effect)
@@ -305,6 +344,34 @@ class MainActivity : ComponentActivity() {
             return true
         }
 
+        /** Android opent het toetsenbord niet vanzelf als de tik niet in de pagina zelf begon (glazen balk). */
+        @JavascriptInterface
+        fun showKeyboard() {
+            runOnUiThread {
+                if (!onOurSite()) return@runOnUiThread
+                web.requestFocus()
+                getSystemService(InputMethodManager::class.java).showSoftInput(web, 0)
+            }
+        }
+
+        /** Vertelt de pagina of de hele glazen vormgeving kan: menu's, navigatie en panelen. */
+        @JavascriptInterface
+        fun glassUi(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
+        @JavascriptInterface
+        fun glassMenuItems(json: String) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+            val menu = JSONObject(json)
+            runOnUiThread { if (onOurSite()) glassMenu?.refresh(glassItems(menu), menu.optBoolean("dark")) }
+        }
+
+        @JavascriptInterface
+        fun glassBar(json: String) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+            val bar = JSONObject(json)
+            runOnUiThread { if (onOurSite()) showGlassBar(bar) }
+        }
+
         @JavascriptInterface
         fun setDark(dark: Boolean) {
             runOnUiThread { if (onOurSite()) setDarkBars(dark) }
@@ -322,6 +389,10 @@ class MainActivity : ComponentActivity() {
             } catch (_: ActivityNotFoundException) {
             }
             return true
+        }
+
+        override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) glassMenu?.hideBar()
         }
 
         override fun onPageCommitVisible(view: WebView, url: String?) {

@@ -184,7 +184,7 @@ internal class GlassMenuContent(
       }
       val centerY = row.rect.centerY()
       if (row.item.checked == true) {
-        drawIcon(canvas, "check", null, Metrics.CheckCenter * density, centerY, 13.5f, color, 1.9f)
+        drawIcon(canvas, "check", null, Metrics.CheckCenter * density, centerY, 13.5f, row.item.color ?: color, 1.9f)
       }
       if (hasIcon(row.item)) {
         val center = (if (reservesCheck) Metrics.IconCenterWithCheck else Metrics.IconCenterPlain) * density

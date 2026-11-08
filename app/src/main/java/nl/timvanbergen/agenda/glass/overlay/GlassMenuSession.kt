@@ -116,6 +116,7 @@ internal class GlassMenuSession(
 
   fun refreshItems() {
     if (!expanded) return
+    content.dark = anchor.isDark()
     content.setItems(anchor.items, anchor.menuWidth, availableWidth)
     val height = min(content.height, maximumHeight)
     maximumScroll = max(content.height - height, 0f)
@@ -361,7 +362,10 @@ internal class GlassMenuSession(
         jelly.release()
         val row = content.rowAt(x - target.left, y - target.top + scroll)
         when {
-          dismissOnUp -> overlay.requestClose()
+          dismissOnUp -> {
+            overlay.hapticTick()
+            overlay.requestClose()
+          }
           row != null && !scrolling -> select(row.index)
           else -> highlight(null, immediate = false)
         }
@@ -399,6 +403,7 @@ internal class GlassMenuSession(
 
   fun select(index: Int) {
     val row = content.rows.firstOrNull { it.index == index }?.takeIf { it.selectable } ?: return
+    overlay.hapticConfirm()
     anchor.notifySelect(row.item, row.index)
     if (row.item.keepOpen) {
       highlight(null, immediate = false)

@@ -27,10 +27,15 @@ internal object GlassIcons {
     }
     "list" -> Path().apply {
       for (y in listOf(6f, 12f, 18f)) {
-        moveTo(8.5f, y); lineTo(21f, y)
-        addCircle(3.9f, y, .35f, Path.Direction.CW)
+        moveTo(9f, y); lineTo(20f, y)
+        addCircle(4.5f, y, 1.2f, Path.Direction.CW)
       }
     }
+    "search" -> Path().apply {
+      addCircle(11f, 11f, 7f, Path.Direction.CW)
+      moveTo(20f, 20f); lineTo(16.5f, 16.5f)
+    }
+    "more" -> Path().apply { for (x in listOf(5.5f, 12f, 18.5f)) addCircle(x, 12f, 1.6f, Path.Direction.CW) }
     "plus" -> Path().apply { moveTo(12f, 4f); lineTo(12f, 20f); moveTo(4f, 12f); lineTo(20f, 12f) }
     "filter" -> Path().apply {
       moveTo(3.5f, 7f); lineTo(20.5f, 7f); moveTo(6.5f, 12f); lineTo(17.5f, 12f); moveTo(9.5f, 17f); lineTo(14.5f, 17f)

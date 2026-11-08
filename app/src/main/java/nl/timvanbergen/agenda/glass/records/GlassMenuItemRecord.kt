@@ -12,4 +12,5 @@ class GlassMenuItemRecord(
   val keepOpen: Boolean = false,
   val separator: Boolean = false,
   val heading: Boolean = false,
+  val color: Int? = null,
 )

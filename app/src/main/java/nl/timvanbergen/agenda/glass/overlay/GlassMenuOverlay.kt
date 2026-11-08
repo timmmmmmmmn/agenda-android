@@ -23,6 +23,7 @@ import androidx.annotation.RequiresApi
 import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import androidx.customview.widget.ExploreByTouchHelper
+import nl.timvanbergen.agenda.glass.GlassBar
 import nl.timvanbergen.agenda.glass.GlassMenuAnchor
 import kotlin.math.min
 
@@ -41,6 +42,9 @@ internal class GlassMenuOverlay(
   private var lastFrameNanos = 0L
   private val accessibility = MenuAccessibility()
   var anchor: GlassMenuAnchor? = null
+  var bar: GlassBar? = null
+  private val restRect = RectF()
+  private val tabRect = RectF()
   private var backCallback: Any? = null
   private var animationScale = 1f
   private var startupFrames = 0
@@ -67,9 +71,27 @@ internal class GlassMenuOverlay(
   }
 
   override fun onPreDraw(): Boolean {
-    // Menu dicht: niets opnemen, zodat de agenda er geen hinder van heeft.
-    if (session != null && backdropChanged()) invalidate()
+    // Geen glas in beeld: niets opnemen, zodat de agenda er geen hinder van heeft.
+    if (hasGlass() && backdropChanged()) invalidate()
     return true
+  }
+
+  private fun hasGlass() = session != null || bar?.isVisible == true
+
+  /** De balk is veranderd: opnieuw tekenen en de nieuwe tabbladen melden aan TalkBack. */
+  fun barChanged() {
+    updateAccessibility()
+    accessibility.invalidateRoot()
+    requestFrame()
+    invalidate()
+  }
+
+  private fun updateAccessibility() {
+    importantForAccessibility = if (hasGlass()) IMPORTANT_FOR_ACCESSIBILITY_YES else IMPORTANT_FOR_ACCESSIBILITY_NO
+  }
+
+  fun refreshItems() {
+    session?.refreshItems()
   }
 
   private fun backdropChanged(): Boolean {
@@ -87,7 +109,7 @@ internal class GlassMenuOverlay(
       active?.drawFallback(canvas)
       return
     }
-    if (active == null) {
+    if (!hasGlass()) {
       warmShaders(canvas)
       return
     }
@@ -102,11 +124,14 @@ internal class GlassMenuOverlay(
   }
 
   @RequiresApi(Build.VERSION_CODES.TIRAMISU)
-  private fun drawGlass(canvas: Canvas, active: GlassMenuSession) {
+  private fun drawGlass(canvas: Canvas, active: GlassMenuSession?) {
     val node = backdrop ?: return
     node.setPosition(limits)
+    // Eigen laag op volledige grootte: anders denkt de WebView dat alleen het stukje onder
+    // het glas zichtbaar is en tekent hij de rest van de pagina niet meer.
+    node.setUseCompositingLayer(true, null)
     val recording = node.beginRecording(width, height)
-    recording.drawColor(if (active.anchor.isDark()) Color.BLACK else Color.WHITE)
+    recording.drawColor(if ((active?.anchor ?: bar?.surfaces?.first())?.isDark() != false) Color.BLACK else Color.WHITE)
     root.background?.draw(recording)
     for (index in 0 until root.childCount) {
       val child = root.getChildAt(index)
@@ -116,7 +141,46 @@ internal class GlassMenuOverlay(
     }
     node.endRecording()
 
-    active.draw(canvas, node, limits)
+    bar?.takeIf { it.isVisible }?.surfaces?.forEach { drawRestingAnchor(canvas, node, it) }
+    active?.draw(canvas, node, limits)
+  }
+
+  private fun drawRestingAnchor(canvas: Canvas, node: RenderNode, anchor: GlassMenuAnchor) {
+    if (anchor.width == 0 || anchor.height == 0) return
+    val opacity = anchor.opacity
+    if (opacity <= 0f) return
+    val state = anchor.surfaceState
+    anchorRect(anchor, restRect)
+    state.incoming.set(restRect)
+    state.captureBounds.set(restRect)
+    state.captureBounds.inset(-RestCaptureMargin * density, -RestCaptureMargin * density)
+    state.lockedFieldStep = 0f
+    anchor.jelly.deformControl(state.incoming, density, anchor.triggerConfig.jelly)
+    val radius = anchor.cornerRadiusPx(state.incoming)
+    state.radiusX = radius
+    state.radiusY = radius
+    state.hasSource = false
+    state.smoothing = 0f
+    state.lensHeight = 0f
+    state.lensAmount = 0f
+    state.materialProgress = 0f
+    state.surfaceOpacity = opacity
+    state.dark = anchor.isDark()
+    state.config = anchor.config
+    state.trigger = anchor.triggerConfig
+    anchor.applyLight(state, restRect, 1f)
+    val renderer = anchor.renderer(density)
+    renderer.prepare(state)
+    renderer.drawGlass(canvas, node, state, limits)
+    if (renderer.warmPipelines(canvas)) post { invalidate() }
+    val content = anchor.recordContent()
+    content.alpha = opacity
+    content.setScaleX(state.incoming.width() / anchor.width)
+    content.setScaleY(state.incoming.height() / anchor.height)
+    val save = canvas.save()
+    canvas.translate(state.incoming.left, state.incoming.top)
+    canvas.drawRenderNode(content)
+    canvas.restoreToCount(save)
   }
 
   fun anchorRect(anchor: GlassMenuAnchor, out: RectF) {
@@ -133,7 +197,7 @@ internal class GlassMenuOverlay(
     isFocusableInTouchMode = true
     requestFocus()
     registerBack()
-    importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+    updateAccessibility()
     accessibility.invalidateRoot()
     requestFrame()
     invalidate()
@@ -162,7 +226,7 @@ internal class GlassMenuOverlay(
     isFocusable = false
     isFocusableInTouchMode = false
     unregisterBack()
-    importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    updateAccessibility()
   }
 
   private fun finishSession() {
@@ -191,6 +255,14 @@ internal class GlassMenuOverlay(
     val seconds = if (scale == 0f) 10f else min(elapsed, limit) / scale
     lastFrameNanos = frameTimeNanos
     var running = false
+    bar?.let { current ->
+      current.tick(seconds)
+      for (surface in current.surfaces) {
+        surface.jelly.advance(seconds)
+        if (!surface.jelly.isSettled) running = true
+      }
+      if (current.needsFrame) running = true
+    }
     val active = session
     if (active != null) {
       val speed = active.anchor.config.speed
@@ -209,20 +281,19 @@ internal class GlassMenuOverlay(
   }
 
   override fun onTouchEvent(event: MotionEvent): Boolean {
-    val active = session ?: return false
-    if (!active.expanded) return false
+    val active = session
+    if (active == null || !active.expanded) return bar?.onTouch(event) == true
     active.onTouch(event)
     requestFrame()
     return true
   }
 
   fun hapticTick() {
-    val constant = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-      HapticFeedbackConstants.SEGMENT_FREQUENT_TICK
-    } else {
-      HapticFeedbackConstants.CLOCK_TICK
-    }
-    performHapticFeedback(constant)
+    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+  }
+
+  fun hapticConfirm() {
+    performHapticFeedback(HapticFeedbackConstants.CONFIRM)
   }
 
   override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -252,14 +323,43 @@ internal class GlassMenuOverlay(
     accessibility.dispatchHoverEvent(event) || super.dispatchHoverEvent(event)
 
   private inner class MenuAccessibility : ExploreByTouchHelper(this) {
-    override fun getVirtualViewAt(x: Float, y: Float): Int =
-      session?.rowIndexAt(x, y)?.takeIf { it >= 0 } ?: INVALID_ID
+    override fun getVirtualViewAt(x: Float, y: Float): Int {
+      val active = session
+      if (active != null && active.expanded) return active.rowIndexAt(x, y).takeIf { it >= 0 } ?: INVALID_ID
+      val current = bar?.takeIf { it.isVisible } ?: return INVALID_ID
+      if (current.addRect().contains(x, y)) return BarAddId
+      for (index in 0 until current.tabCount()) {
+        current.tabRect(index, tabRect)
+        if (tabRect.contains(x, y)) return BarTabId + index
+      }
+      return INVALID_ID
+    }
 
     override fun getVisibleVirtualViews(ids: MutableList<Int>) {
-      session?.accessibleRows()?.forEach { ids.add(it.index) }
+      val active = session
+      if (active != null && active.expanded) {
+        active.accessibleRows().forEach { ids.add(it.index) }
+        return
+      }
+      val current = bar?.takeIf { it.isVisible } ?: return
+      for (index in 0 until current.tabCount()) ids.add(BarTabId + index)
+      ids.add(BarAddId)
     }
 
     override fun onPopulateNodeForVirtualView(id: Int, node: AccessibilityNodeInfoCompat) {
+      val current = bar
+      if (id >= BarAddId && current != null) {
+        val index = id - BarTabId
+        val known = id == BarAddId || index in 0 until current.tabCount()
+        if (id != BarAddId && known) current.tabRect(index, tabRect) else tabRect.set(current.addRect())
+        node.text = if (id == BarAddId || !known) "Nieuwe afspraak" else current.tabTitle(index)
+        node.className = "android.widget.Button"
+        node.isClickable = true
+        node.addAction(AccessibilityNodeInfoCompat.ACTION_CLICK)
+        @Suppress("DEPRECATION")
+        node.setBoundsInParent(Rect(tabRect.left.toInt(), tabRect.top.toInt(), tabRect.right.toInt(), tabRect.bottom.toInt()))
+        return
+      }
       val row = session?.accessibleRows()?.firstOrNull { it.index == id }
       node.text = row?.item?.title ?: ""
       node.className = "android.widget.Button"
@@ -275,12 +375,20 @@ internal class GlassMenuOverlay(
 
     override fun onPerformActionForVirtualView(id: Int, action: Int, arguments: Bundle?): Boolean {
       if (action != AccessibilityNodeInfoCompat.ACTION_CLICK) return false
+      val current = bar
+      if (id >= BarAddId && current != null) {
+        if (id == BarAddId) current.tapAdd() else current.tapTab(id - BarTabId)
+        return true
+      }
       session?.select(id) ?: return false
       return true
     }
   }
 
   companion object {
+    private const val RestCaptureMargin = 16f
+    private const val BarAddId = 1000
+    private const val BarTabId = 1001
     private const val DefaultRefreshRate = 60f
     private const val MinimumRefreshRate = 30f
     private const val MaxSkippedFrames = 2.5f
