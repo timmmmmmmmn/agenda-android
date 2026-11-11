@@ -35,6 +35,11 @@ Ze zijn native en tekenen echt glas over de pagina (`glass/`); de pagina geeft d
 de inhoud door via `AgendaNative`. Al het andere blijft plat. Op oudere toestellen blijft
 de gewone app.
 
+Op toestellen die het aankunnen tekent de site zelf de navigatie en de schuifknoppen met
+[Glisse](https://github.com/0kzh/glisse) (MIT), met echte breking van wat eronder ligt
+(zie `glisse/` in de repo `agenda`). De native glazen balk is dan de terugval: op zwakkere
+toestellen, of als het scrollen gaat haperen. De native menu's blijven zoals ze waren.
+
 De code is overgenomen uit
 [expo-glass-custom-menu](https://github.com/rit3zh/expo-glass-custom-menu) (MIT, zie
 `glass/LICENSE`), zonder Expo en React Native. Het lettertype Inter valt onder de OFL
